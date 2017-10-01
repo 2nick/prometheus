@@ -25,7 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	opentracing "github.com/opentracing/opentracing-go"
+	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/log"
 	"github.com/prometheus/common/model"
@@ -126,7 +126,7 @@ func (ss *SyncStrategy) Set(s string) error {
 
 // Possible values for SyncStrategy.
 const (
-	_ SyncStrategy = iota
+	_        SyncStrategy = iota
 	Never
 	Always
 	Adaptive
@@ -592,7 +592,7 @@ func (s *MemorySeriesStorage) QueryRange(ctx context.Context, from, through mode
 	span.SetTag(numSeries, len(fpSeriesPairs))
 	iterators := make([]SeriesIterator, 0, len(fpSeriesPairs))
 	for _, pair := range fpSeriesPairs {
-		it := s.preloadChunksForRange(pair, from, through)
+		it := s.preloadChunksForRange(ctx, pair, from, through)
 		iterators = append(iterators, it)
 	}
 	return iterators, nil
@@ -1001,7 +1001,7 @@ func (s *MemorySeriesStorage) logThrottling() {
 			if !timer.Reset(time.Minute) {
 				score, _ := s.getPersistenceUrgencyScore()
 				log.
-					With("urgencyScore", score).
+				With("urgencyScore", score).
 					With("chunksToPersist", s.getNumChunksToPersist()).
 					With("memoryChunks", atomic.LoadInt64(&chunk.NumMemChunks)).
 					Error("Storage needs throttling. Scrapes and rule evaluations will be skipped.")
@@ -1009,7 +1009,7 @@ func (s *MemorySeriesStorage) logThrottling() {
 		case <-timer.C:
 			score, _ := s.getPersistenceUrgencyScore()
 			log.
-				With("urgencyScore", score).
+			With("urgencyScore", score).
 				With("chunksToPersist", s.getNumChunksToPersist()).
 				With("memoryChunks", atomic.LoadInt64(&chunk.NumMemChunks)).
 				Info("Storage does not need throttling anymore.")
@@ -1083,6 +1083,7 @@ func (s *MemorySeriesStorage) seriesForRange(
 }
 
 func (s *MemorySeriesStorage) preloadChunksForRange(
+	ctx context.Context,
 	pair fingerprintSeriesPair,
 	from model.Time, through model.Time,
 ) SeriesIterator {
@@ -1093,6 +1094,11 @@ func (s *MemorySeriesStorage) preloadChunksForRange(
 
 	s.fpLocker.Lock(fp)
 	defer s.fpLocker.Unlock(fp)
+
+	span, _ := opentracing.StartSpanFromContext(ctx, "preloadChunksForRange")
+	span.SetTag("fingerprint", fp.String())
+	span.SetTag("metric", series.metric.String())
+	defer span.Finish()
 
 	iter, err := series.preloadChunksForRange(fp, from, through, s)
 	if err != nil {
@@ -1851,7 +1857,7 @@ func (s *MemorySeriesStorage) getPersistenceUrgencyScore() (float64, bool) {
 		// We are out of rushed mode!
 		s.rushed = false
 		log.
-			With("urgencyScore", score).
+		With("urgencyScore", score).
 			With("chunksToPersist", s.getNumChunksToPersist()).
 			With("memoryChunks", atomic.LoadInt64(&chunk.NumMemChunks)).
 			Info("Storage has left rushed mode.")
@@ -1861,7 +1867,7 @@ func (s *MemorySeriesStorage) getPersistenceUrgencyScore() (float64, bool) {
 		// Enter rushed mode.
 		s.rushed = true
 		log.
-			With("urgencyScore", score).
+		With("urgencyScore", score).
 			With("chunksToPersist", s.getNumChunksToPersist()).
 			With("memoryChunks", atomic.LoadInt64(&chunk.NumMemChunks)).
 			Warn("Storage has entered rushed mode.")
@@ -1885,7 +1891,7 @@ func (s *MemorySeriesStorage) quarantineSeries(fp model.Fingerprint, metric mode
 		// Request submitted.
 	default:
 		log.
-			With("fingerprint", fp).
+		With("fingerprint", fp).
 			With("metric", metric).
 			With("reason", err).
 			Warn("Quarantine queue full. Dropped quarantine request.")
@@ -1899,7 +1905,7 @@ func (s *MemorySeriesStorage) handleQuarantine() {
 		case req := <-s.quarantineRequests:
 			s.purgeSeries(req.fp, req.metric, req.reason)
 			log.
-				With("fingerprint", req.fp).
+			With("fingerprint", req.fp).
 				With("metric", req.metric).
 				With("reason", req.reason).
 				Warn("Series quarantined.")
@@ -1956,7 +1962,7 @@ func (s *MemorySeriesStorage) purgeSeries(fp model.Fingerprint, m model.Metric, 
 		// No reason stated, simply delete the file.
 		if _, err := s.persistence.deleteSeriesFile(fp); err != nil {
 			log.
-				With("fingerprint", fp).
+			With("fingerprint", fp).
 				With("metric", m).
 				With("error", err).
 				Error("Error deleting series file.")
@@ -1968,7 +1974,7 @@ func (s *MemorySeriesStorage) purgeSeries(fp model.Fingerprint, m model.Metric, 
 		} else {
 			s.seriesOps.WithLabelValues(failedQuarantine).Inc()
 			log.
-				With("fingerprint", fp).
+			With("fingerprint", fp).
 				With("metric", m).
 				With("reason", quarantineReason).
 				With("error", err).

@@ -38,6 +38,9 @@ import (
 	"github.com/prometheus/prometheus/storage/local"
 	"github.com/prometheus/prometheus/storage/remote"
 	"github.com/prometheus/prometheus/web"
+
+	"github.com/opentracing/opentracing-go"
+	zipkin "github.com/openzipkin/zipkin-go-opentracing"
 )
 
 func main() {
@@ -83,6 +86,26 @@ func Main() int {
 	if os.Getenv("GOGC") == "" {
 		debug.SetGCPercent(defaultGCPercent)
 	}
+
+	// To collect just use docker
+	// interactive: docker run --rm -it -p 9410-9411:9410-9411 openzipkin/zipkin:latest
+	// daemon: docker run -d -p 9410-9411:9410-9411 openzipkin/zipkin:latest
+	zipkinHTTPEndpoint := "http://localhost:9411/api/v1/spans"
+	collector, err := zipkin.NewHTTPCollector(zipkinHTTPEndpoint)
+	if err != nil {
+		log.Fatal(err)
+		return 3
+	}
+
+	tracer, err := zipkin.NewTracer(
+		zipkin.NewRecorder(collector, false, "0.0.0.0:0", "prometheus"),
+		zipkin.ClientServerSameSpan(true),
+		zipkin.TraceID128Bit(true),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	opentracing.InitGlobalTracer(tracer)
 
 	log.Infoln("Starting prometheus", version.Info())
 	log.Infoln("Build context", version.BuildContext())

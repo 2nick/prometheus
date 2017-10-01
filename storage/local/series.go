@@ -23,7 +23,23 @@ import (
 
 	"github.com/prometheus/prometheus/storage/local/chunk"
 	"github.com/prometheus/prometheus/storage/metric"
+	"github.com/prometheus/client_golang/prometheus"
 )
+
+var seriesChunksLoads = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "chunks_loads_total",
+		Help:      "The total number of chunk loaded by series with fingerprint.",
+	},
+	[]string{"fingerprint","metric"},
+)
+
+
+func init() {
+	prometheus.MustRegister(seriesChunksLoads)
+}
 
 // fingerprintSeriesPair pairs a fingerprint with a memorySeries pointer.
 type fingerprintSeriesPair struct {
@@ -234,7 +250,7 @@ func (s *memorySeries) add(v model.SamplePair) (int, error) {
 	}
 
 	// Populate lastTime of now-closed chunks.
-	for _, cd := range s.chunkDescs[len(s.chunkDescs)-len(chunks) : len(s.chunkDescs)-1] {
+	for _, cd := range s.chunkDescs[len(s.chunkDescs)-len(chunks): len(s.chunkDescs)-1] {
 		if err := cd.MaybePopulateLastTime(); err != nil {
 			return 0, err
 		}
@@ -354,6 +370,9 @@ func (s *memorySeries) preloadChunks(
 			chunk.Ops.WithLabelValues(chunk.Unpin).Add(float64(len(pinnedChunkDescs)))
 			return nopIter, err
 		}
+
+		seriesChunksLoads.WithLabelValues(fp.String(), s.metric.String()).Add(float64(len(chunks)))
+
 		for i, c := range chunks {
 			s.chunkDescs[loadIndexes[i]].SetChunk(c)
 		}
