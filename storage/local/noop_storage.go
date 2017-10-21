@@ -84,6 +84,11 @@ func (s *NoopQuerier) LabelValuesForLabelName(ctx context.Context, labelName mod
 	return nil, nil
 }
 
+// LabelNames implements Querier.
+func (s *NoopQuerier) LabelNames(ctx context.Context) (model.LabelNames, error) {
+	return nil, nil
+}
+
 // DropMetricsForLabelMatchers implements Storage.
 func (s *NoopStorage) DropMetricsForLabelMatchers(ctx context.Context, matchers ...*metric.LabelMatcher) (int, error) {
 	return 0, nil

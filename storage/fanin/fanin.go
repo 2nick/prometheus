@@ -121,6 +121,10 @@ func (q querier) LabelValuesForLabelName(ctx context.Context, ln model.LabelName
 	return q.local.LabelValuesForLabelName(ctx, ln)
 }
 
+func (q querier) LabelNames(ctx context.Context) (model.LabelNames, error) {
+	return q.local.LabelNames(ctx)
+}
+
 func (q querier) Close() error {
 	if q.local != nil {
 		if err := q.local.Close(); err != nil {

@@ -85,7 +85,7 @@ const (
 type indexingOpType byte
 
 const (
-	add indexingOpType = iota
+	add    indexingOpType = iota
 	remove
 )
 
@@ -439,6 +439,27 @@ func (p *persistence) labelValuesForLabelName(ln model.LabelName) (model.LabelVa
 		return nil, err
 	}
 	return lvs, nil
+}
+
+func (p *persistence) labelNames() (model.LabelNames, error) {
+	var lns model.LabelNames
+	var ln codable.LabelName
+
+	err := p.labelNameToLabelValues.ForEach(func(kv index.KeyValueAccessor) error {
+		err := kv.Key(&ln)
+		if err == nil {
+			lns = append(lns, model.LabelName(ln))
+		}
+
+		return err
+	})
+
+	if err != nil {
+		p.setDirty(fmt.Errorf("error in method labelNames(): %s", err))
+		return nil, err
+	}
+
+	return lns, nil
 }
 
 // persistChunks persists a number of consecutive chunks of a series. It is the
@@ -865,7 +886,7 @@ func (p *persistence) loadSeriesMapAndHeads() (sm *seriesMap, chunksToPersist in
 	if hs.err != nil {
 		p.dirty = true
 		log.
-			With("file", p.headsFileName()).
+		With("file", p.headsFileName()).
 			With("error", hs.err).
 			Error("Error reading heads file.")
 		return sm, 0, hs.err

@@ -187,6 +187,11 @@ func (q *querier) LabelValuesForLabelName(ctx context.Context, ln model.LabelNam
 	return nil, nil
 }
 
+func (q *querier) LabelNames(ctx context.Context) (model.LabelNames, error) {
+	// TODO: Implement remote metadata querying.
+	return nil, nil
+}
+
 func (q *querier) Close() error {
 	return nil
 }
