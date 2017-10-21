@@ -441,6 +441,27 @@ func (p *persistence) labelValuesForLabelName(ln model.LabelName) (model.LabelVa
 	return lvs, nil
 }
 
+func (p *persistence) labelNames() (model.LabelNames, error) {
+	var lns model.LabelNames
+	var ln codable.LabelName
+
+	err := p.labelNameToLabelValues.ForEach(func(kv index.KeyValueAccessor) error {
+		err := kv.Key(&ln)
+		if err == nil {
+			lns = append(lns, model.LabelName(ln))
+		}
+
+		return err
+	})
+
+	if err != nil {
+		p.setDirty(fmt.Errorf("error in method labelNames(): %s", err))
+		return nil, err
+	}
+
+	return lns, nil
+}
+
 // persistChunks persists a number of consecutive chunks of a series. It is the
 // caller's responsibility to not modify the chunks concurrently and to not
 // persist or drop anything for the same fingerprint concurrently. It returns

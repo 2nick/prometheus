@@ -105,6 +105,10 @@ func (q testQuerier) LabelValuesForLabelName(ctx context.Context, ln model.Label
 	panic("not implemented")
 }
 
+func (q testQuerier) LabelNames(ctx context.Context) (model.LabelNames, error) {
+	panic("not implemented")
+}
+
 func (q testQuerier) Close() error {
 	return nil
 }

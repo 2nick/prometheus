@@ -85,6 +85,8 @@ type Querier interface {
 	LastSampleForLabelMatchers(ctx context.Context, cutoff model.Time, matcherSets ...metric.LabelMatchers) (model.Vector, error)
 	// Get all of the label values that are associated with a given label name.
 	LabelValuesForLabelName(context.Context, model.LabelName) (model.LabelValues, error)
+	// Get all of the label values that are associated with a given label name.
+	LabelNames(context.Context) (model.LabelNames, error)
 }
 
 // SeriesIterator enables efficient access of sample values in a series. Its

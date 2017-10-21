@@ -883,6 +883,11 @@ func (s *MemorySeriesStorage) LabelValuesForLabelName(_ context.Context, labelNa
 	return s.persistence.labelValuesForLabelName(labelName)
 }
 
+// LabelNames implements Storage.
+func (s *MemorySeriesStorage) LabelNames(ctx context.Context) (model.LabelNames, error) {
+	return s.persistence.labelNames()
+}
+
 // DropMetricsForLabelMatchers implements Storage.
 func (s *MemorySeriesStorage) DropMetricsForLabelMatchers(_ context.Context, matchers ...*metric.LabelMatcher) (int, error) {
 	fps, err := s.fpsForLabelMatchers(model.Earliest, model.Latest, matchers...)
