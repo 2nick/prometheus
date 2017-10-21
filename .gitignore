@@ -17,6 +17,7 @@ tags
 
 /prometheus
 /promtool
+/promsharder
 benchmark.txt
 /data
 /.build
