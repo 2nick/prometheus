@@ -23,7 +23,9 @@ func (v *visitor) Visit(node promql.Node) promql.Visitor {
 
 	return v
 }
-
+// private function with `interface{}` arg needs here
+// because *Selector-s doesn't implement promql.Node interface
+// because they both hove no String() function
 func (v *visitor) grabLabelMatchers(s interface{}) {
 	if ss, ok := s.(*promql.MatrixSelector); ok {
 		//fmt.Printf(">>> %T %+v\n", ss, *ss)

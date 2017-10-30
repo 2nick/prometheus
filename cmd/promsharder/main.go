@@ -20,6 +20,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/prometheus/common/model"
@@ -35,7 +36,7 @@ import (
 )
 
 //var defaultQuery = "sum(rate(mmm{instance=~\"aero.+\"}[1h]))"
-var defaultQuery = "mmm{instance=~\"aero.+\"} + mmm{instance!=\"wave\"} * 123 + sum(rate({__name__=~\"go.+\"}[10h]))"
+var defaultQuery = "mmm{instance=~\"aero.+\"} + mmm{instance!=\"wave\"} * 123 + sum(rate({__name__=~\"go.*\"}[10h]))"
 
 var serversConfig = map[string]*sharding.LabelsMap{
 	"server.a": &sharding.LabelsMap{
@@ -71,7 +72,7 @@ var serversConfig = map[string]*sharding.LabelsMap{
 	},
 }
 
-var servers = []sharding.PromMockServer{}
+var servers = []*sharding.PromMockServer{}
 
 func init() {
 	for url, labelsMap := range serversConfig {
@@ -80,16 +81,6 @@ func init() {
 			sharding.NewMockServer(url, labelsMap),
 		)
 	}
-}
-
-type prefix int
-
-func (p prefix) String() string {
-	if p > 0 {
-		return "++ "
-	}
-
-	return "-- "
 }
 
 // ExplainQueryCmd validates configuration files.
@@ -101,41 +92,49 @@ func ExplainQueryCmd(t cli.Term, args ...string) int {
 		return 1
 	}
 
-	labelMatchers, err := sharding.Parse(stmt.query)
+	pool := sharding.NewPromPool(servers)
+	mappings, err := pool.Plan(stmt.query)
 	if err != nil {
-		t.Errorf("Error:\n%s\n\n", err.Error())
+		t.Errorf("Pool error:\n%s\n\n", err.Error())
 		return 2
 	}
 
-	pool := sharding.NewPromPool(servers)
-	mappings, err := pool.Plan(labelMatchers)
-	if err != nil {
-		t.Errorf("Pool error:\n%s\n\n", err.Error())
-		return 3
-	}
+	for i, mapping := range mappings {
+		if i > 0 {
+			fmt.Println()
+		}
 
-	for _, mapping := range mappings {
-		foundAll := 1
 		lines := []string{}
 
-		lines = append(lines, fmt.Sprintf("%s {%s}", mapping.Server.Url, mapping.Matchers))
-		for ln, lm := range mapping.LabelsMap {
-			valCount := len(lm)
-			if valCount == 0 {
-				foundAll = 0
+		lines = append(lines, mapping.Server.Url)
+
+		prefix := "++"
+		for l, mappingResult := range mapping.Result {
+			if l > 0 {
+				lines = append(lines, "\n")
 			}
 
-			lines = append(lines, fmt.Sprintf(prefix(valCount).String()+"%s %s %+v", mapping.Server.Url, ln, lm))
+			lines = append(lines, fmt.Sprintf("%+v", mappingResult.Matchers))
+			for lm, lv := range mappingResult.LabelsMap {
+				localPrefix := "++"
+				if len(lv) < 1 {
+					prefix = "--"
+					localPrefix = "--"
+				}
+
+				lines = append(lines, fmt.Sprintf("%s %s = %+v", localPrefix, lm, lv))
+			}
 		}
 
 		for _, line := range lines {
-			fmt.Println(prefix(foundAll).String() + line)
+			line = strings.Trim(line, "\n")
+			if len(line) > 0 {
+				line = strings.Repeat(prefix, 2) + " " + line
+			}
+
+			fmt.Println(line)
 		}
-
-		fmt.Println()
 	}
-
-	sharding.Parse(stmt.query)
 
 	//v, err := queryRange(stmt)
 	//if err != nil {
@@ -215,7 +214,7 @@ func parseArgs(args []string) (*statement, error) {
 		timeout string
 	}{}
 
-	fs := &flag.FlagSet{}
+	fs := flag.CommandLine
 
 	fs.StringVar(&cmdArgs.query, "q", defaultQuery, "query")
 	fs.StringVar(&cmdArgs.start, "s", "2017-10-21T00:00:00+00:00", "start")

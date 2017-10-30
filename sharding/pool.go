@@ -3,9 +3,12 @@ package sharding
 import (
 	"sync"
 
+	"github.com/prometheus/common/log"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/storage/metric"
 )
+
+var baseLogger = log.Base()
 
 type PromServer interface {
 }
@@ -27,7 +30,7 @@ type PromMockServer struct {
 	*PromHTTPServer
 }
 
-func NewMockServer(url string, labelsMap *LabelsMap) PromMockServer {
+func NewMockServer(url string, labelsMap *LabelsMap) *PromMockServer {
 	var lm LabelsMap
 	if labelsMap == nil {
 		lm = make(LabelsMap)
@@ -35,7 +38,7 @@ func NewMockServer(url string, labelsMap *LabelsMap) PromMockServer {
 		lm = *labelsMap
 	}
 
-	return PromMockServer{
+	return &PromMockServer{
 		labelsWithValuesMap: lm,
 		PromHTTPServer: &PromHTTPServer{
 			Url: url,
@@ -43,58 +46,85 @@ func NewMockServer(url string, labelsMap *LabelsMap) PromMockServer {
 	}
 }
 
-func (s *PromMockServer) findLabels(lms metric.LabelMatchers) PromQueryShardMapping {
-	labels := make(LabelsMap, len(lms))
+func (s *PromMockServer) findLabels(queryTSMatchers []metric.LabelMatchers) PromQueryShardMapping {
+	serverLogger := baseLogger.With("server", s.Url)
 
-	for _, lm := range lms {
-		values, ok := s.labelsWithValuesMap[lm.Name]
-		if !ok {
-			values = model.LabelValues{}
+	queryShardMapping := PromQueryShardMapping{Server: s}
+	queryShardMapping.Result = []MatchersMappingResult{}
+
+	for _, matchersGroup := range queryTSMatchers {
+		result := MatchersMappingResult{
+			Matchers:  matchersGroup,
+			LabelsMap: make(LabelsMap, len(queryTSMatchers)),
 		}
 
-		labels[lm.Name] = lm.Filter(values)
+		lmsLogger := serverLogger.With("matchers", matchersGroup)
+		lmsLogger.Debug("-> Searching")
+		found := "I have enough labels"
+		for _, lm := range matchersGroup {
+			values, ok := s.labelsWithValuesMap[lm.Name]
+			if !ok {
+				values = model.LabelValues{}
+			}
+
+			result.LabelsMap[lm.Name] = lm.Filter(values)
+
+			if len(result.LabelsMap[lm.Name]) < 1 {
+				found = ":("
+			}
+
+			lmsLogger.With("lm", lm).With("found", len(result.LabelsMap[lm.Name])).With("result", result.LabelsMap[lm.Name])
+		}
+
+		lmsLogger.Debug("<- ", found)
+
+		queryShardMapping.Result = append(queryShardMapping.Result, result)
 	}
 
-	return PromQueryShardMapping{
-		Server:    s,
-		Matchers:  lms,
-		LabelsMap: labels,
-	}
+	return queryShardMapping
 }
 
-type PromQueryShardMapping struct {
-	Server    *PromMockServer
+type MatchersMappingResult struct {
 	Matchers  metric.LabelMatchers
 	LabelsMap LabelsMap
 }
 
+type PromQueryShardMapping struct {
+	Server *PromMockServer
+	Result []MatchersMappingResult
+}
+
 type PromPool interface {
-	Plan([]metric.LabelMatchers) ([]PromQueryShardMapping, error)
+	Plan(query string) ([]PromQueryShardMapping, error)
 }
 
-type promPool []PromMockServer
+type promPool []*PromMockServer
 
-func NewPromPool(servers []PromMockServer) PromPool {
-	return promPool(servers)
+func NewPromPool(servers []*PromMockServer) PromPool {
+	pool := promPool(servers)
+	return &pool
 }
 
-func (pp promPool) Plan(matchers []metric.LabelMatchers) ([]PromQueryShardMapping, error) {
-	mappingsCount := len(matchers) * len(pp)
+func (pp *promPool) Plan(query string) ([]PromQueryShardMapping, error) {
+	queryTSMatchers, err := Parse(query)
+	if err != nil {
+		return nil, err
+	}
 
+	servers := *pp
+	poolLength := len(servers)
 	mappings := []PromQueryShardMapping{}
-	mappingsChan := make(chan PromQueryShardMapping, mappingsCount)
+	mappingsChan := make(chan PromQueryShardMapping, poolLength)
 
 	var wg sync.WaitGroup
 
-	wg.Add(mappingsCount)
+	wg.Add(poolLength)
 
-	for _, s := range pp {
-		for _, labelsMatchers := range matchers {
-			go func(ps PromMockServer, lms metric.LabelMatchers) {
-				mappingsChan <- ps.findLabels(lms)
-				wg.Done()
-			}(s, labelsMatchers)
-		}
+	for _, s := range servers {
+		//go func(ps PromMockServer, lms []metric.LabelMatchers) {
+		mappingsChan <- s.findLabels(queryTSMatchers)
+		wg.Done()
+		//}(s, queryTSMatchers)
 	}
 
 	go func() {
