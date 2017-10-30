@@ -18,6 +18,7 @@ import (
 	"flag"
 	"fmt"
 	"math"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -25,18 +26,20 @@ import (
 
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/common/version"
+	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/promql"
+	"github.com/prometheus/prometheus/sharding"
 	"github.com/prometheus/prometheus/storage/fanin"
 	"github.com/prometheus/prometheus/storage/local"
 	"github.com/prometheus/prometheus/storage/remote"
 	"github.com/prometheus/prometheus/util/cli"
-	"golang.org/x/net/context"
 
-	"github.com/prometheus/prometheus/sharding"
+	"golang.org/x/net/context"
 )
 
 //var defaultQuery = "sum(rate(mmm{instance=~\"aero.+\"}[1h]))"
-var defaultQuery = "mmm{instance=~\"aero.+\"} + mmm{instance!=\"wave\"} * 123 + sum(rate({__name__=~\"go.*\"}[10h]))"
+//var defaultQuery = "mmm{instance=~\"aero.+\"} + mmm{instance!=\"wave\"} * 123 + sum(rate({__name__=~\"go.*\"}[10h]))"
+var defaultQuery = "irate(prometheus_local_storage_ingested_samples_total{job='prometheus'}[5m])"
 
 var serversConfig = map[string]*sharding.LabelsMap{
 	"server.a": &sharding.LabelsMap{
@@ -70,20 +73,112 @@ var serversConfig = map[string]*sharding.LabelsMap{
 			"aerowater",
 		},
 	},
+	"http://localhost:9090": &sharding.LabelsMap{
+		"__name__": []model.LabelValue{
+			"prometheus_local_storage_ingested_samples_total",
+		},
+		"job": []model.LabelValue{
+			"prometheus",
+		},
+	},
+	"http://localhost:9091": &sharding.LabelsMap{
+		"__name__": []model.LabelValue{
+			"prometheus_local_storage_ingested_samples_total",
+		},
+		"job": []model.LabelValue{
+			"prometheus",
+		},
+	},
 }
 
 var servers = []*sharding.PromMockServer{}
 
 func init() {
-	for url, labelsMap := range serversConfig {
+	for serverURL, labelsMap := range serversConfig {
 		servers = append(
 			servers,
-			sharding.NewMockServer(url, labelsMap),
+			sharding.NewMockServer(serverURL, labelsMap),
 		)
 	}
 }
 
-// ExplainQueryCmd validates configuration files.
+// RunQueryCmd runs query
+func RunQueryCmd(t cli.Term, args ...string) int {
+	stmt, err := parseArgs(args)
+	if err != nil {
+		t.Errorf("Error:\n%s\n\n", err.Error())
+		t.Infof("usage: promsharder run -q <query> -s <start-date> -e <end-date> -st <step> [-t <timeout>]")
+		return 1
+	}
+
+	pool := sharding.NewPromPool(servers)
+	mappings, err := pool.Plan(stmt.query)
+	if err != nil {
+		t.Errorf("Pool error:\n%s\n\n", err.Error())
+		return 2
+	}
+
+	cfg, err := config.Load("")
+	for i, mapping := range mappings {
+		if i > 0 {
+			fmt.Println()
+		}
+
+		foundAll := true
+		for _, mappingResult := range mapping.Result {
+			for _, lv := range mappingResult.LabelsMap {
+				if len(lv) < 1 {
+					foundAll = false
+					break
+				}
+			}
+		}
+
+		if !foundAll {
+			continue
+		}
+
+		serverURL, err := url.Parse(mapping.Server.Url + "/api/v1/read")
+		if err != nil {
+			t.Errorf("Error during parsing server url", err.Error())
+			return 2
+		}
+
+		cfg.RemoteReadConfigs = append(
+			cfg.RemoteReadConfigs,
+			&config.RemoteReadConfig{
+				URL:           &config.URL{serverURL},
+				RemoteTimeout: model.Duration(1 * time.Second),
+			},
+		)
+	}
+
+	queryable := fanin.Queryable{
+		Local:  &local.NoopStorage{},
+		Remote: &remote.Reader{},
+	}
+
+	queryable.Remote.ApplyConfig(cfg)
+
+	engine := promql.NewEngine(
+		&queryable,
+		nil,
+	)
+
+	query, err := engine.NewInstantQuery(stmt.query, model.Now())
+	if err != nil {
+		t.Errorf("Error during create query", err.Error())
+		return 2
+	}
+
+	result := query.Exec(context.Background())
+
+	fmt.Println(result.String())
+
+	return 0
+}
+
+// ExplainQueryCmd explains query
 func ExplainQueryCmd(t cli.Term, args ...string) int {
 	stmt, err := parseArgs(args)
 	if err != nil {
@@ -287,8 +382,13 @@ func main() {
 	app := cli.NewApp("promsharder")
 
 	app.Register("explain", &cli.Command{
-		Desc: "validate configuration files for correctness",
+		Desc: "explain query",
 		Run:  ExplainQueryCmd,
+	})
+
+	app.Register("run", &cli.Command{
+		Desc: "run query",
+		Run:  RunQueryCmd,
 	})
 
 	app.Register("version", &cli.Command{

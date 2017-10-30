@@ -46,10 +46,10 @@ func NewMockServer(url string, labelsMap *LabelsMap) *PromMockServer {
 	}
 }
 
-func (s *PromMockServer) findLabels(queryTSMatchers []metric.LabelMatchers) PromQueryShardMapping {
+func (s *PromMockServer) findLabels(queryTSMatchers []metric.LabelMatchers) *PromQueryServerMapping {
 	serverLogger := baseLogger.With("server", s.Url)
 
-	queryShardMapping := PromQueryShardMapping{Server: s}
+	queryShardMapping := &PromQueryServerMapping{Server: s}
 	queryShardMapping.Result = []MatchersMappingResult{}
 
 	for _, matchersGroup := range queryTSMatchers {
@@ -89,13 +89,13 @@ type MatchersMappingResult struct {
 	LabelsMap LabelsMap
 }
 
-type PromQueryShardMapping struct {
+type PromQueryServerMapping struct {
 	Server *PromMockServer
 	Result []MatchersMappingResult
 }
 
 type PromPool interface {
-	Plan(query string) ([]PromQueryShardMapping, error)
+	Plan(query string) ([]PromQueryServerMapping, error)
 }
 
 type promPool []*PromMockServer
@@ -105,7 +105,7 @@ func NewPromPool(servers []*PromMockServer) PromPool {
 	return &pool
 }
 
-func (pp *promPool) Plan(query string) ([]PromQueryShardMapping, error) {
+func (pp *promPool) Plan(query string) ([]PromQueryServerMapping, error) {
 	queryTSMatchers, err := Parse(query)
 	if err != nil {
 		return nil, err
@@ -113,8 +113,8 @@ func (pp *promPool) Plan(query string) ([]PromQueryShardMapping, error) {
 
 	servers := *pp
 	poolLength := len(servers)
-	mappings := []PromQueryShardMapping{}
-	mappingsChan := make(chan PromQueryShardMapping, poolLength)
+	mappings := []PromQueryServerMapping{}
+	mappingsChan := make(chan *PromQueryServerMapping, poolLength)
 
 	var wg sync.WaitGroup
 
@@ -133,7 +133,7 @@ func (pp *promPool) Plan(query string) ([]PromQueryShardMapping, error) {
 	}()
 
 	for mapping := range mappingsChan {
-		mappings = append(mappings, mapping)
+		mappings = append(mappings, *mapping)
 	}
 
 	return mappings, nil
