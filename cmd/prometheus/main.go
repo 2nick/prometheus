@@ -50,6 +50,7 @@ import (
 	"github.com/prometheus/prometheus/storage/remote"
 	"github.com/prometheus/prometheus/storage/tsdb"
 	"github.com/prometheus/prometheus/web"
+	"github.com/prometheus/prometheus/storage/aggregate"
 )
 
 var (
@@ -225,7 +226,15 @@ func main() {
 	var (
 		localStorage  = &tsdb.ReadyStorage{}
 		remoteStorage = remote.NewStorage(log.With(logger, "component", "remote"), localStorage.StartTime)
-		fanoutStorage = storage.NewFanout(logger, localStorage, remoteStorage)
+
+		localInMemoryAggregateStorage, _ = aggregate.NewAggregateStorage()
+
+		fanoutStorage = storage.NewFanout(
+			logger,
+			localStorage,
+			remoteStorage,
+			localInMemoryAggregateStorage,
+		)
 	)
 
 	cfg.queryEngine.Logger = log.With(logger, "component", "query engine")
